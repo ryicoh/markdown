@@ -70,7 +70,7 @@ class BlockParser {
   final List<BlockSyntax> blockSyntaxes = [];
 
   /// Index of the current line.
-  int _pos = 0;
+  int pos = 0;
 
   /// Whether the parser has encountered a blank line between two block-level
   /// elements.
@@ -104,13 +104,13 @@ class BlockParser {
   }
 
   /// Gets the current line.
-  String get current => lines[_pos];
+  String get current => lines[pos];
 
   /// Gets the line after the current one or `null` if there is none.
   String? get next {
     // Don't read past the end.
-    if (_pos >= lines.length - 1) return null;
-    return lines[_pos + 1];
+    if (pos >= lines.length - 1) return null;
+    return lines[pos + 1];
   }
 
   /// Gets the line that is [linesAhead] lines ahead of the current one, or
@@ -124,15 +124,15 @@ class BlockParser {
       throw ArgumentError('Invalid linesAhead: $linesAhead; must be >= 0.');
     }
     // Don't read past the end.
-    if (_pos >= lines.length - linesAhead) return null;
-    return lines[_pos + linesAhead];
+    if (pos >= lines.length - linesAhead) return null;
+    return lines[pos + linesAhead];
   }
 
   void advance() {
-    _pos++;
+    pos++;
   }
 
-  bool get isDone => _pos >= lines.length;
+  bool get isDone => pos >= lines.length;
 
   /// Gets whether or not the current line matches the given pattern.
   bool matches(RegExp regex) {
@@ -162,6 +162,13 @@ class BlockParser {
   }
 }
 
+class ParseChildLinesResult {
+  final List<String?> lines;
+  final List<String> source;
+
+  ParseChildLinesResult({required this.lines, required this.source});
+}
+
 abstract class BlockSyntax {
   const BlockSyntax();
 
@@ -176,18 +183,20 @@ abstract class BlockSyntax {
 
   Node? parse(BlockParser parser);
 
-  List<String?> parseChildLines(BlockParser parser) {
+  ParseChildLinesResult parseChildLines(BlockParser parser) {
     // Grab all of the lines that form the block element.
     var childLines = <String?>[];
+    final List<String> source = [];
 
     while (!parser.isDone) {
       var match = pattern.firstMatch(parser.current);
       if (match == null) break;
       childLines.add(match[1]);
+      source.add(parser.current);
       parser.advance();
     }
 
-    return childLines;
+    return ParseChildLinesResult(lines: childLines, source: source);
   }
 
   /// Gets whether or not [parser]'s current line should end the previous block.
@@ -254,16 +263,19 @@ class SetextHeaderSyntax extends BlockSyntax {
   Node parse(BlockParser parser) {
     var lines = <String>[];
     String? tag;
+    final List<String> source = [];
     while (!parser.isDone) {
       var match = _setextPattern.firstMatch(parser.current);
       if (match == null) {
         // More text.
         lines.add(parser.current);
+        source.add(parser.current);
         parser.advance();
         continue;
       } else {
         // The underline.
         tag = (match[1]![0] == '=') ? 'h1' : 'h2';
+        source.add(parser.current);
         parser.advance();
         break;
       }
@@ -271,7 +283,7 @@ class SetextHeaderSyntax extends BlockSyntax {
 
     var contents = UnparsedContent(lines.join('\n').trimRight());
 
-    return Element(tag!, [contents]);
+    return Element(tag!, [contents], source: source);
   }
 
   bool _interperableAsParagraph(String line) =>
@@ -308,10 +320,11 @@ class HeaderSyntax extends BlockSyntax {
   @override
   Node parse(BlockParser parser) {
     var match = pattern.firstMatch(parser.current)!;
+    final source = [parser.current];
     parser.advance();
     var level = match[1]!.length;
     var contents = UnparsedContent(match[2]!.trim());
-    return Element('h$level', [contents]);
+    return Element('h$level', [contents], source: source);
   }
 }
 
@@ -335,14 +348,16 @@ class BlockquoteSyntax extends BlockSyntax {
   const BlockquoteSyntax();
 
   @override
-  List<String> parseChildLines(BlockParser parser) {
+  ParseChildLinesResult parseChildLines(BlockParser parser) {
     // Grab all of the lines that form the blockquote, stripping off the ">".
     var childLines = <String>[];
+    final List<String> source = [];
 
     while (!parser.isDone) {
       var match = pattern.firstMatch(parser.current);
       if (match != null) {
         childLines.add(match[1]!);
+        source.add(parser.current);
         parser.advance();
         continue;
       }
@@ -353,23 +368,25 @@ class BlockquoteSyntax extends BlockSyntax {
       if (parser.blockSyntaxes.firstWhere((s) => s.canParse(parser))
           is ParagraphSyntax) {
         childLines.add(parser.current);
+        source.add(parser.current);
         parser.advance();
       } else {
         break;
       }
     }
 
-    return childLines;
+    return ParseChildLinesResult(lines: childLines, source: source);
   }
 
   @override
   Node parse(BlockParser parser) {
-    var childLines = parseChildLines(parser);
+    var res = parseChildLines(parser);
+    final List<String> lines = res.lines.whereType<String>().toList();
 
     // Recursively parse the contents of the blockquote.
-    var children = BlockParser(childLines, parser.document).parseLines();
+    var children = BlockParser(lines, parser.document).parseLines();
 
-    return Element('blockquote', children);
+    return Element('blockquote', children, source: res.source);
   }
 }
 
@@ -384,13 +401,15 @@ class CodeBlockSyntax extends BlockSyntax {
   const CodeBlockSyntax();
 
   @override
-  List<String?> parseChildLines(BlockParser parser) {
+  ParseChildLinesResult parseChildLines(BlockParser parser) {
     var childLines = <String?>[];
+    final List<String> source = [];
 
     while (!parser.isDone) {
       var match = pattern.firstMatch(parser.current);
       if (match != null) {
         childLines.add(match[1]);
+        source.add(parser.current);
         parser.advance();
       } else {
         // If there's a codeblock, then a newline, then a codeblock, keep the
@@ -400,6 +419,8 @@ class CodeBlockSyntax extends BlockSyntax {
         if (parser.current.trim() == '' && nextMatch != null) {
           childLines.add('');
           childLines.add(nextMatch[1]);
+          source.add(parser.current);
+          source.add(parser.next ?? '');
           parser.advance();
           parser.advance();
         } else {
@@ -407,22 +428,23 @@ class CodeBlockSyntax extends BlockSyntax {
         }
       }
     }
-    return childLines;
+    return ParseChildLinesResult(lines: childLines, source: source);
   }
 
   @override
   Node parse(BlockParser parser) {
-    var childLines = parseChildLines(parser);
+    var res = parseChildLines(parser);
 
     // The Markdown tests expect a trailing newline.
-    childLines.add('');
+    res.lines.add('');
 
-    var content = childLines.join('\n');
+    var content = res.lines.join('\n');
     if (parser.document.encodeHtml) {
       content = escapeHtml(content);
     }
 
-    return Element('pre', [Element.text('code', content)]);
+    return Element('pre', [Element.text('code', content, source: res.source)],
+        source: res.source);
   }
 }
 
@@ -450,24 +472,29 @@ class FencedCodeBlockSyntax extends BlockSyntax {
   }
 
   @override
-  List<String> parseChildLines(BlockParser parser, [String? endBlock]) {
+  ParseChildLinesResult parseChildLines(BlockParser parser,
+      [String? endBlock]) {
     endBlock ??= '';
 
     var childLines = <String>[];
+    final List<String> source = [];
+    source.add(parser.current);
     parser.advance();
 
     while (!parser.isDone) {
       var match = pattern.firstMatch(parser.current);
       if (match == null || !match[1]!.startsWith(endBlock)) {
         childLines.add(parser.current);
+        source.add(parser.current);
         parser.advance();
       } else {
+        source.add(parser.current);
         parser.advance();
         break;
       }
     }
 
-    return childLines;
+    return ParseChildLinesResult(lines: childLines, source: source);
   }
 
   @override
@@ -477,16 +504,16 @@ class FencedCodeBlockSyntax extends BlockSyntax {
     var endBlock = match.group(1);
     var infoString = match.group(2)!;
 
-    var childLines = parseChildLines(parser, endBlock);
+    var res = parseChildLines(parser, endBlock);
 
     // The Markdown tests expect a trailing newline.
-    childLines.add('');
+    res.lines.add('');
 
-    var text = childLines.join('\n');
+    var text = res.lines.join('\n');
     if (parser.document.encodeHtml) {
       text = escapeHtml(text);
     }
-    var code = Element.text('code', text);
+    var code = Element.text('code', text, source: res.source);
 
     // the info-string should be trimmed
     // http://spec.commonmark.org/0.22/#example-100
@@ -504,7 +531,7 @@ class FencedCodeBlockSyntax extends BlockSyntax {
       code.attributes['class'] = 'language-$infoString';
     }
 
-    var element = Element('pre', [code]);
+    var element = Element('pre', [code], source: res.source);
 
     return element;
   }
@@ -519,8 +546,9 @@ class HorizontalRuleSyntax extends BlockSyntax {
 
   @override
   Node parse(BlockParser parser) {
+    final List<String> source = [parser.current];
     parser.advance();
-    return Element.empty('hr');
+    return Element.empty('hr', source: source);
   }
 }
 
@@ -667,6 +695,7 @@ abstract class ListSyntax extends BlockSyntax {
   Node parse(BlockParser parser) {
     var items = <ListItem>[];
     var childLines = <String>[];
+    List<String> source = [];
 
     void endItem() {
       if (childLines.isNotEmpty) {
@@ -760,6 +789,7 @@ abstract class ListSyntax extends BlockSyntax {
         // Anything else is paragraph continuation text.
         childLines.add(parser.current);
       }
+      source.add(parser.current);
       parser.advance();
     }
 
@@ -773,7 +803,7 @@ abstract class ListSyntax extends BlockSyntax {
     for (var item in items) {
       var itemParser = BlockParser(item.lines, parser.document);
       var children = itemParser.parseLines();
-      itemNodes.add(Element('li', children));
+      itemNodes.add(Element('li', children, source: source));
       anyEmptyLinesBetweenBlocks =
           anyEmptyLinesBetweenBlocks || itemParser.encounteredBlankLine;
     }
@@ -800,9 +830,10 @@ abstract class ListSyntax extends BlockSyntax {
     }
 
     if (listTag == 'ol' && startNumber != 1) {
-      return Element(listTag, itemNodes)..attributes['start'] = '$startNumber';
+      return Element(listTag, itemNodes, source: source)
+        ..attributes['start'] = '$startNumber';
     } else {
-      return Element(listTag, itemNodes);
+      return Element(listTag, itemNodes, source: source);
     }
   }
 
@@ -860,6 +891,16 @@ class OrderedListSyntax extends ListSyntax {
   const OrderedListSyntax();
 }
 
+class ParseRowResult {
+  final Element element;
+  final List<String> source;
+
+  ParseRowResult({
+    required this.element,
+    required this.source,
+  });
+}
+
 /// Parses tables.
 class TableSyntax extends BlockSyntax {
   @override
@@ -886,23 +927,29 @@ class TableSyntax extends BlockSyntax {
   Node? parse(BlockParser parser) {
     var alignments = _parseAlignments(parser.next!);
     var columnCount = alignments.length;
-    var headRow = _parseRow(parser, alignments, 'th');
+    final res = _parseRow(parser, alignments, 'th');
+    final List<String> source = res.source;
+
+    var headRow = res.element;
     if (headRow.children!.length != columnCount) {
       return null;
     }
-    var head = Element('thead', [headRow]);
+    var head = Element('thead', [headRow], source: []);
 
+    source.add(parser.current);
     // Advance past the divider of hyphens.
     parser.advance();
 
     var rows = <Element>[];
     while (!parser.isDone && !BlockSyntax.isAtBlockEnd(parser)) {
-      var row = _parseRow(parser, alignments, 'td');
+      final res = _parseRow(parser, alignments, 'td');
+      source.addAll(res.source);
+      var row = res.element;
       var children = row.children;
       if (children != null) {
         while (children.length < columnCount) {
           // Insert synthetic empty cells.
-          children.add(Element.empty('td'));
+          children.add(Element.empty('td', source: source));
         }
         while (children.length > columnCount) {
           children.removeLast();
@@ -914,11 +961,11 @@ class TableSyntax extends BlockSyntax {
       rows.add(row);
     }
     if (rows.isEmpty) {
-      return Element('table', [head]);
+      return Element('table', [head], source: source);
     } else {
-      var body = Element('tbody', rows);
+      var body = Element('tbody', rows, source: source);
 
-      return Element('table', [head, body]);
+      return Element('table', [head, body], source: source);
     }
   }
 
@@ -953,12 +1000,14 @@ class TableSyntax extends BlockSyntax {
   ///
   /// [alignments] is used to annotate an alignment on each cell, and
   /// [cellType] is used to declare either "td" or "th" cells.
-  Element _parseRow(
+  ParseRowResult _parseRow(
       BlockParser parser, List<String?> alignments, String cellType) {
     var line = parser.current;
     var cells = <String>[];
     var index = _walkPastOpeningPipe(line);
     var cellBuffer = StringBuffer();
+
+    final List<String> source = [];
 
     while (true) {
       if (index >= line.length) {
@@ -1008,9 +1057,11 @@ class TableSyntax extends BlockSyntax {
         index++;
       }
     }
+    source.add(parser.current);
     parser.advance();
     var row = [
-      for (var cell in cells) Element(cellType, [UnparsedContent(cell)])
+      for (var cell in cells)
+        Element(cellType, [UnparsedContent(cell)], source: source)
     ];
 
     for (var i = 0; i < row.length && i < alignments.length; i++) {
@@ -1018,7 +1069,8 @@ class TableSyntax extends BlockSyntax {
       row[i].attributes['style'] = 'text-align: ${alignments[i]};';
     }
 
-    return Element('tr', row);
+    return ParseRowResult(
+        element: Element('tr', row, source: source), source: source);
   }
 
   /// Walks past whitespace in [line] starting at [index].
@@ -1079,10 +1131,12 @@ class ParagraphSyntax extends BlockSyntax {
   @override
   Node parse(BlockParser parser) {
     var childLines = <String>[];
+    final List<String> source = [];
 
     // Eat until we hit something that ends a paragraph.
     while (!BlockSyntax.isAtBlockEnd(parser)) {
       childLines.add(parser.current);
+      source.add(parser.current);
       parser.advance();
     }
 
@@ -1092,7 +1146,7 @@ class ParagraphSyntax extends BlockSyntax {
       return Text('');
     } else {
       var contents = UnparsedContent(paragraphLines.join('\n').trimRight());
-      return Element('p', [contents]);
+      return Element('p', [contents], source: source);
     }
   }
 

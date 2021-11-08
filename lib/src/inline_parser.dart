@@ -396,7 +396,7 @@ class LineBreakSyntax extends InlineSyntax {
   /// Create a void <br> element.
   @override
   bool onMatch(InlineParser parser, Match match) {
-    parser.addNode(Element.empty('br'));
+    parser.addNode(Element.empty('br', source: ["\n"]));
     return true;
   }
 }
@@ -489,7 +489,7 @@ class EmailAutolinkSyntax extends InlineSyntax {
   bool onMatch(InlineParser parser, Match match) {
     var url = match[1]!;
     var text = parser._encodeHtml ? escapeHtml(url) : url;
-    var anchor = Element.text('a', text);
+    var anchor = Element.text('a', text, source: [parser.source ?? '']);
     anchor.attributes['href'] = Uri.encodeFull('mailto:$url');
     parser.addNode(anchor);
 
@@ -505,7 +505,7 @@ class AutolinkSyntax extends InlineSyntax {
   bool onMatch(InlineParser parser, Match match) {
     var url = match[1]!;
     var text = parser._encodeHtml ? escapeHtml(url) : url;
-    var anchor = Element.text('a', text);
+    var anchor = Element.text('a', text, source: [parser.source ?? '']);
     anchor.attributes['href'] = Uri.encodeFull(url);
     parser.addNode(anchor);
 
@@ -622,7 +622,7 @@ class AutolinkExtensionSyntax extends InlineSyntax {
     }
 
     final text = parser._encodeHtml ? escapeHtml(url) : url;
-    final anchor = Element.text('a', text);
+    final anchor = Element.text('a', text, source: [parser.source ?? '']);
     anchor.attributes['href'] = Uri.encodeFull(href);
     parser.addNode(anchor);
 
@@ -939,7 +939,8 @@ class TagSyntax extends InlineSyntax {
   Node? close(InlineParser parser, Delimiter opener, Delimiter closer,
       {required List<Node> Function() getChildren}) {
     var strong = opener.length >= 2 && closer.length >= 2;
-    return Element(strong ? 'strong' : 'em', getChildren());
+    return Element(strong ? 'strong' : 'em', getChildren(),
+        source: [parser.source ?? '']);
   }
 }
 
@@ -951,7 +952,7 @@ class StrikethroughSyntax extends TagSyntax {
   @override
   Node close(InlineParser parser, Delimiter opener, Delimiter closer,
       {required List<Node> Function() getChildren}) {
-    return Element('del', getChildren());
+    return Element('del', getChildren(), source: [parser.source ?? '']);
   }
 }
 
@@ -1069,7 +1070,7 @@ class LinkSyntax extends TagSyntax {
   Node _createNode(String destination, String? title,
       {required List<Node> Function() getChildren}) {
     var children = getChildren();
-    var element = Element('a', children);
+    var element = Element('a', children, source: [""]);
     element.attributes['href'] = escapeAttribute(destination);
     if (title != null && title.isNotEmpty) {
       element.attributes['title'] = escapeAttribute(title);
@@ -1368,7 +1369,7 @@ class ImageSyntax extends LinkSyntax {
   @override
   Element _createNode(String destination, String? title,
       {required List<Node> Function() getChildren}) {
-    var element = Element.empty('img');
+    var element = Element.empty('img', source: ['']);
     var children = getChildren();
     element.attributes['src'] = destination;
     element.attributes['alt'] = children.map((node) => node.textContent).join();
@@ -1420,7 +1421,7 @@ class CodeSyntax extends InlineSyntax {
   bool onMatch(InlineParser parser, Match match) {
     var code = match[2]!.trim().replaceAll('\n', ' ');
     if (parser._encodeHtml) code = escapeHtml(code);
-    parser.addNode(Element.text('code', code));
+    parser.addNode(Element.text('code', code, source: [parser.source ?? '']));
 
     return true;
   }

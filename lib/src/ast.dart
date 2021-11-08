@@ -11,6 +11,7 @@ abstract class Node {
   void accept(NodeVisitor visitor);
 
   String get textContent;
+  List<String> get source;
 }
 
 /// A named tag that can contain other nodes.
@@ -20,21 +21,25 @@ class Element implements Node {
   final Map<String, String> attributes;
   String? generatedId;
 
+  @override
+  final List<String> source;
+
   /// Instantiates a [tag] Element with [children].
-  Element(this.tag, this.children) : attributes = <String, String>{};
+  Element(this.tag, this.children, {required this.source})
+      : attributes = <String, String>{};
 
   /// Instantiates an empty, self-closing [tag] Element.
-  Element.empty(this.tag)
+  Element.empty(this.tag, {required this.source})
       : children = null,
         attributes = {};
 
   /// Instantiates a [tag] Element with no [children].
-  Element.withTag(this.tag)
+  Element.withTag(this.tag, {required this.source})
       : children = [],
         attributes = {};
 
   /// Instantiates a [tag] Element with a single Text child.
-  Element.text(this.tag, String text)
+  Element.text(this.tag, String text, {required this.source})
       : children = [Text(text)],
         attributes = {};
 
@@ -63,7 +68,12 @@ class Element implements Node {
 class Text implements Node {
   final String text;
 
-  Text(this.text);
+  @override
+  late final List<String> source;
+
+  Text(this.text) {
+    source = [text];
+  }
 
   @override
   void accept(NodeVisitor visitor) => visitor.visitText(this);
@@ -82,7 +92,12 @@ class UnparsedContent implements Node {
   @override
   final String textContent;
 
-  UnparsedContent(this.textContent);
+  @override
+  late final List<String> source;
+
+  UnparsedContent(this.textContent) {
+    source = [textContent];
+  }
 
   @override
   void accept(NodeVisitor visitor) {}
