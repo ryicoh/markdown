@@ -1,4 +1,4 @@
-name: markdown
+name: markdown_ryicoh
 version: 4.0.1
 
 description: A portable Markdown library written in Dart that can parse

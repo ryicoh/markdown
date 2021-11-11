@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 /// Parses text in a Markdown-like format and renders to HTML.
-library markdown;
+library markdown_ryicoh;
 
 import 'src/version.dart';
 
